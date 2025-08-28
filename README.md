@@ -1,3 +1,13 @@
+# This repo is for the MCL6809 modifications to run on a Coco3
+
+I have modified the MCL6809 to run at 2Mhz on the Coco3.  I added the following as well
+
+   Reading .rom files from an SD card
+   Becker port for communication with a DriveWire server (effectively >200kbaud)
+   [WIP] mmu emulation for shadow ram
+   [WIP] emudisk emulation for reading and writing to vhd images on the sd card.
+   
+
 # Ted Fried's MicroCore Labs Projects
 
 My blog which has some details on these projects: www.MicroCoreLabs.Wordpress.com
