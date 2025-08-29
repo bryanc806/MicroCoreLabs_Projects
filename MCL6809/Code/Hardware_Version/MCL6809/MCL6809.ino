@@ -333,8 +333,8 @@ void setup() {
 
   SD.begin(BUILTIN_SDCARD);
   Serial.begin(115200);
-  //Serial1.begin(115200);
-  //Serial1.println("Init start");
+  SerialUSB1.begin(115200);
+  SerialUSB1.println("Init start");
 #ifdef SHADOW_RAM
   int i;
   for (i = 0; i < LOW_RAM_BARRIER; i++)
@@ -353,7 +353,7 @@ void setup() {
   }
   #endif
 
-  //Serial1.println("Init done");
+  SerialUSB1.println("Init done");
   
 }
 
@@ -371,22 +371,34 @@ inline void openEmuDsk()
   char  caName[30];
   sprintf(caName, "hd%d.vhd", emudsk_drive);
   femuDsk = SD.open(caName, FILE_WRITE);
-  if (!femuDsk)
-    emudsk_status = 2;
-  else
-    emudsk_status = 0;
 
+  SerialUSB1.print("Opening ");
+  SerialUSB1.print(caName);
+  if (!femuDsk)
+  {
+    SerialUSB1.println(" failed");
+    emudsk_status = 2;
+  }
+  else
+  {
+    SerialUSB1.println(" success");
+    emudsk_status = 0;
+  }
+  lastVHD = emudsk_drive;
 }
 
 uint8_t diskBuf[256];
 inline void doEmuDisk(uint8_t command)
 {
+  interrupts();
   switch (command)
   {
     case 0: // read
       openEmuDsk();
       if (emudsk_status == 0)
       {
+        SerialUSB1.print("Reading LSN:");
+        SerialUSB1.println(emudsk_lsn);
         femuDsk.seek(emudsk_lsn << 8);
         femuDsk.read(diskBuf, 256);
         uint8_t *p = diskBuf;
@@ -395,8 +407,11 @@ inline void doEmuDisk(uint8_t command)
       }
       break;
     case 1: // write
+      openEmuDsk();
       if (emudsk_status == 0)
       {
+          SerialUSB1.print("Writing LSN:");
+          SerialUSB1.println(emudsk_lsn);
           uint8_t *p = diskBuf;
           for (int i = emudsk_buffer; i < emudsk_buffer + 256; i++)
           {
@@ -411,8 +426,10 @@ inline void doEmuDisk(uint8_t command)
     case 2: // close
       if (femuDsk)
         femuDsk.close();
+      SerialUSB1.println("close");
       break;
   }
+  noInterrupts();
 }
 
 
@@ -568,22 +585,22 @@ FASTRUN inline uint8_t BIU_Read_Byte(uint16_t local_address)  {
       break;
 
     case EMUDSK_LSN+0:
-      return (emudsk_lsn >> 16) & 0xff;
+      return (uint8_t)((emudsk_lsn >> 16) & 0xff);
       break;
     case EMUDSK_LSN+1:
-      return (emudsk_lsn >> 8) & 0xff;
+      return (uint8_t)((emudsk_lsn >> 8) & 0xff);
       break;
     case EMUDSK_LSN+2:
-      return (emudsk_lsn) & 0xff;
+      return (uint8_t)((emudsk_lsn) & 0xff);
       break;
     case EMUDSK_COMMAND:
       return emudsk_status;
       break;
     case EMUDSK_BUFFER:
-      return emudsk_buffer >> 8;
+      return (emudsk_buffer >> 8);
       break;
     case EMUDSK_BUFFER+1:
-      return emudsk_buffer & 0xff;
+      return (emudsk_buffer & 0xff);
       break;
     case EMUDSK_DRIVE:
       return emudsk_drive;
@@ -667,10 +684,10 @@ FASTRUN inline void BIU_Write_Byte(uint16_t local_address , uint8_t local_data) 
         return;
         break;
       case EMUDSK_LSN+0:
-        emudsk_lsn = (emudsk_lsn & 0xff00ffff) | local_data << 16;
+        emudsk_lsn = (emudsk_lsn & 0xff00ffff) | (local_data << 16);
         break;
       case EMUDSK_LSN+1:
-        emudsk_lsn = (emudsk_lsn & 0xffff00ff) | local_data << 8;
+        emudsk_lsn = (emudsk_lsn & 0xffff00ff) | (local_data << 8);
         break;
       case EMUDSK_LSN+2:
         emudsk_lsn = (emudsk_lsn & 0xffffff00) | local_data;
@@ -679,7 +696,7 @@ FASTRUN inline void BIU_Write_Byte(uint16_t local_address , uint8_t local_data) 
         doEmuDisk(local_data);
         break;
       case EMUDSK_BUFFER:
-        emudsk_buffer = (emudsk_buffer & 0x00ff) | local_data<<8;
+        emudsk_buffer = (emudsk_buffer & 0x00ff) | (local_data<<8);
         break;
       case EMUDSK_BUFFER+1:
         emudsk_buffer = (emudsk_buffer & 0xff00) | local_data;
