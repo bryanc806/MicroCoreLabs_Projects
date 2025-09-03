@@ -169,7 +169,7 @@ uint32_t  old_GPIO6         = 0;
 uint8_t interruptBegin = 0;
 
 uint8_t cart_ROM[0x2000];
-//#define SHADOW_RAM 1
+#define SHADOW_RAM 1
 #ifdef SHADOW_RAM
 uint8_t mmu[2][8];
 uint8_t *internal_RAM[64];
@@ -183,6 +183,7 @@ uint8_t low_RAM[LOW_RAM_BARRIER][0x2000];
 uint8_t cc3_init0 = 0;
 uint8_t cc3_init1 = 0;
 #define TASK_REG  (cc3_init1 & 0x01)
+#define VECTOR_RAM  (cc3_init0 & 0x08)
 #define CC3_ROMMODE  0xffde
 #define CC3_RAMMODE  0xffdf
 uint8_t cc3_romram = 0;
@@ -370,10 +371,10 @@ inline void openEmuDsk()
     femuDsk.close();
   char  caName[30];
   sprintf(caName, "hd%d.vhd", emudsk_drive);
-  femuDsk = SD.open(caName, FILE_WRITE);
-
   SerialUSB1.print("Opening ");
-  SerialUSB1.print(caName);
+  SerialUSB1.println(caName);
+  femuDsk = SD.open(caName, FILE_READ);
+
   if (!femuDsk)
   {
     SerialUSB1.println(" failed");
@@ -410,8 +411,8 @@ inline void doEmuDisk(uint8_t command)
       openEmuDsk();
       if (emudsk_status == 0)
       {
-          SerialUSB1.print("Writing LSN:");
-          SerialUSB1.println(emudsk_lsn);
+          //SerialUSB1.print("Writing LSN:");
+          //SerialUSB1.println(emudsk_lsn);
           uint8_t *p = diskBuf;
           for (int i = emudsk_buffer; i < emudsk_buffer + 256; i++)
           {
@@ -426,10 +427,10 @@ inline void doEmuDisk(uint8_t command)
     case 2: // close
       if (femuDsk)
         femuDsk.close();
-      SerialUSB1.println("close");
+      //SerialUSB1.println("close");
       break;
   }
-  noInterrupts();
+//  noInterrupts();
 }
 
 
@@ -546,6 +547,7 @@ FASTRUN inline void wait_for_CLK_falling_edge() {
   }
     
 
+uint8_t busWait = 0;
 // -------------------------------------------------
 // Initiate a MC6809 Read Bus Cycle
 // -------------------------------------------------    
@@ -554,61 +556,67 @@ FASTRUN inline uint8_t BIU_Read_Byte(uint16_t local_address)  {
  
     if ( ((local_address>=0xC000) && (local_address<0xFF00)) && (((cc3_init0 & 0x2) == 0) || ((cc3_init0 & 0x03) == 3)) && (cc3_romram == 0) )  { read_data = cart_ROM[local_address-0xc000];  return read_data; }   // Cartridge ROMs always internal for testing
 
-    if (! (((local_address>=0x8000) && (local_address<0xFF00)) && (((cc3_init0 & 0x2) == 0) || ((cc3_init0 & 0x03) == 2)) && (cc3_romram == 0)))// Basic rom
+    if ((local_address < 0xfe00) && (((cc3_init0 & 0x2) == 0) || ((cc3_init0 & 0x03) == 2)) && (cc3_romram == 1))
     {
-     if (local_address < 0xff00)
-     {
 #ifdef SHADOW_RAM
       uint8_t a;
       a = (mmu[TASK_REG][local_address >> 13]) & 0x3f;
-      wait_for_CLK_falling_edge();
+      if (busWait)
+      {
+        wait_for_CLK_falling_edge();
+//        d = 0;
+        busWait = 0;
+      }
       //wait_for_CLK_falling_edge();
 
       return internal_RAM[a][local_address & 0x1fff];
 #endif
-     }
     }
-   
+
+    wait_for_CLK_falling_edge();
+ 
     //else if ( (internal_address_check(local_address) > 2) && local_address<0xA000 )                               { read_data = internal_RAM[local_address];  return read_data;}   // Accelerated internal reads below 0xA000
-  switch (local_address)
+  if (local_address > 0xff00)
   {
-    case BECKER_STATUS:
-      {
-        if (Serial.available())
-            return 0xff;
-          else
-            return 0;
-      }
-      break;
-    case BECKER_DATA:
-      return Serial.read();
-      break;
+    switch (local_address)
+    {
+      case BECKER_STATUS:
+        {
+          if (Serial.available())
+              return 0xff;
+            else
+              return 0;
+        }
+        break;
+      case BECKER_DATA:
+        return Serial.read();
+        break;
 
-    case EMUDSK_LSN+0:
-      return (uint8_t)((emudsk_lsn >> 16) & 0xff);
-      break;
-    case EMUDSK_LSN+1:
-      return (uint8_t)((emudsk_lsn >> 8) & 0xff);
-      break;
-    case EMUDSK_LSN+2:
-      return (uint8_t)((emudsk_lsn) & 0xff);
-      break;
-    case EMUDSK_COMMAND:
-      return emudsk_status;
-      break;
-    case EMUDSK_BUFFER:
-      return (emudsk_buffer >> 8);
-      break;
-    case EMUDSK_BUFFER+1:
-      return (emudsk_buffer & 0xff);
-      break;
-    case EMUDSK_DRIVE:
-      return emudsk_drive;
-      break;
+      case EMUDSK_LSN+0:
+        return (uint8_t)((emudsk_lsn >> 16) & 0xff);
+        break;
+      case EMUDSK_LSN+1:
+        return (uint8_t)((emudsk_lsn >> 8) & 0xff);
+        break;
+      case EMUDSK_LSN+2:
+        return (uint8_t)((emudsk_lsn) & 0xff);
+        break;
+      case EMUDSK_COMMAND:
+        return emudsk_status;
+        break;
+      case EMUDSK_BUFFER:
+        return (emudsk_buffer >> 8);
+        break;
+      case EMUDSK_BUFFER+1:
+        return (emudsk_buffer & 0xff);
+        break;
+      case EMUDSK_DRIVE:
+        return emudsk_drive;
+        break;
+    }
   }
-     
-  wait_for_CLK_falling_edge();
 
+  busWait = 1;
   GPIO6_DR = (local_address << 16) | 0x2008;          // Drive address, RDWR_n(bit13), ADDR_OE_n(bit12), DATA_OE_n(bit3)
 
   wait_for_CLK_falling_edge();
@@ -621,9 +629,9 @@ FASTRUN inline uint8_t BIU_Read_Byte(uint16_t local_address)  {
 FASTRUN inline uint16_t BIU_Read_Word(uint16_t local_address)  {
     uint16_t read_data;
  
-    if ( ((local_address>=0xC000) && (local_address<0xFF00)) && (((cc3_init0 & 0x2) == 0) || ((cc3_init0 & 0x02) == 3)) && (cc3_romram == 0) )  { read_data = cart_ROM[local_address-0xc000] << 8 | cart_ROM[local_address-0xc000+1];  return read_data; }   // Cartridge ROMs always internal for testing
+    if ( ((local_address>=0xC000) && (local_address<0xFe00)) && (((cc3_init0 & 0x2) == 0) || ((cc3_init0 & 0x02) == 3)) && (cc3_romram == 0) )  { read_data = cart_ROM[local_address-0xc000] << 8 | cart_ROM[local_address-0xc000+1];  return read_data; }   // Cartridge ROMs always internal for testing
 
-     if (local_address < 0xff00)
+     if (local_address < 0xfe00)
      {
 #ifdef SHADOW_RAM
       uint8_t a;
@@ -667,7 +675,7 @@ FASTRUN inline void BIU_Write_Byte(uint16_t local_address , uint8_t local_data) 
   //  return;
   //}
 
-  if (local_address < 0xff00)
+  if (local_address < (0xfe00))
   {
 #ifdef SHADOW_RAM
     uint8_t a;
@@ -742,6 +750,7 @@ FASTRUN inline void BIU_Write_Byte(uint16_t local_address , uint8_t local_data) 
     }
   }
 
+  busWait = 1;
   wait_for_CLK_falling_edge();
 
   address_shifted_16 = (local_address << 16);
@@ -772,7 +781,7 @@ FASTRUN inline void BIU_Write_Word(uint16_t local_address , uint16_t local_data)
   //{
   //  return;
   //}
-  if (local_address < 0xff00)
+  if (local_address < 0xfe00)
   {
 #ifdef SHADOW_RAM
     uint8_t a;
